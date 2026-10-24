@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cassandra-ops-lab: query-first schema design</title>
+<meta name="description" content="Pick a query and see the real Cassandra table that serves it, try consistency levels against replica arithmetic, and read two real incidents from a 3-node lab.">
+<meta property="og:title" content="cassandra-ops-lab">
+<meta property="og:description" content="Pick a query and see the real Cassandra table that serves it, try consistency levels against replica arithmetic, and read two real incidents from a 3-node lab.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2314b8a6'/%3E%3Ccircle cx='16' cy='16' r='6' fill='none' stroke='%23fff' stroke-width='3'/%3E%3C/svg%3E">
+<style>
+
+:root{--bg:#f8fafc;--panel:#fff;--panel2:#f1f5f9;--line:#e2e8f0;--fg:#0f172a;--mute:#475569;--brand:#0f766e;--brand-bg:#ccfbf1;--ok:#047857;--ok-bg:#d1fae5;--err:#b91c1c;--err-bg:#fee2e2;--code:#0b1220;--code-fg:#e2e8f0}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#070d1a;--panel:#0d1526;--panel2:#111c33;--line:#1e2b47;--fg:#e8eefc;--mute:#9fb0cc;--brand:#2dd4bf;--brand-bg:#062f2b;--ok:#34d399;--ok-bg:#06382b;--err:#fca5a5;--err-bg:#3b1212}}
+:root[data-theme=dark]{--bg:#070d1a;--panel:#0d1526;--panel2:#111c33;--line:#1e2b47;--fg:#e8eefc;--mute:#9fb0cc;--brand:#2dd4bf;--brand-bg:#062f2b;--ok:#34d399;--ok-bg:#06382b;--err:#fca5a5;--err-bg:#3b1212}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--brand)}
+code,pre,textarea,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.wrap{max-width:1080px;margin:0 auto;padding:0 16px}
+nav{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;justify-content:space-between;height:56px;gap:12px}
+.logo{display:flex;align-items:center;gap:10px;font-weight:700;color:var(--fg);text-decoration:none}
+.logo i{width:22px;height:22px;border-radius:6px;background:#14b8a6;display:inline-block}
+nav .links{display:flex;gap:18px;align-items:center;font-size:14px}
+nav .links a{color:var(--mute);text-decoration:none}
+nav .links a:hover{color:var(--fg)}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:10px;font-weight:600;text-decoration:none;border:1px solid var(--line);color:var(--fg);background:var(--panel);cursor:pointer;font-size:15px}
+.btn.primary{background:#14b8a6;border-color:#14b8a6;color:#04211e}
+.btn.primary:hover{background:#2dd4bf}
+.btn:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid #14b8a6;outline-offset:2px}
+.hero{padding:72px 0 40px;text-align:center}
+.pill{display:inline-block;font-size:13px;color:var(--brand);background:var(--brand-bg);padding:4px 12px;border-radius:99px;margin-bottom:20px;font-weight:600}
+h1{font-size:clamp(34px,6vw,58px);line-height:1.08;margin:0 0 18px;letter-spacing:-.02em}
+h1 em{font-style:normal;color:var(--brand)}
+.lede{max-width:700px;margin:0 auto 28px;color:var(--mute);font-size:18px}
+.cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.stats{display:flex;gap:28px;justify-content:center;flex-wrap:wrap;margin-top:36px;color:var(--mute);font-size:14px}
+.stats b{display:block;color:var(--fg);font-size:22px}
+section{padding:56px 0}
+h2{font-size:clamp(26px,4vw,36px);margin:0 0 8px;letter-spacing:-.01em}
+.sub{color:var(--mute);margin:0 0 28px;max-width:720px}
+.lab{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+@media (max-width:860px){.lab{grid-template-columns:minmax(0,1fr)}nav .links .hide-s{display:none}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;min-width:0}
+.card h3{margin:0;padding:12px 16px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.tools{display:flex;gap:6px;flex-wrap:wrap}
+.chip{font:600 12px system-ui;padding:5px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--fg);cursor:pointer;text-transform:none;letter-spacing:0}
+.chip[aria-pressed=true]{background:var(--brand-bg);border-color:var(--brand);color:var(--brand)}
+#log{display:block;width:100%;height:420px;border:0;padding:12px 14px;font-size:12.5px;line-height:1.55;background:var(--code);color:var(--code-fg);resize:vertical;white-space:pre;overflow:auto}
+.src{display:flex;gap:8px;align-items:center;padding:10px 14px;border-top:1px solid var(--line);font-size:13px;color:var(--mute);flex-wrap:wrap}
+.out{min-height:420px}
+.status{padding:16px;color:var(--mute);font-size:14px}
+.verdict{padding:18px 16px;border-bottom:1px solid var(--line);background:var(--err-bg)}
+.verdict.unknown{background:var(--panel2)}
+.verdict b{display:block;font-size:20px;text-transform:uppercase;letter-spacing:.04em;color:var(--err)}
+.verdict.unknown b{color:var(--mute)}
+.verdict span{font-size:14px;color:var(--mute)}
+.sec{padding:14px 16px;border-bottom:1px solid var(--line)}
+.sec:last-child{border-bottom:0}
+.sec h4{margin:0 0 8px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
+.bar{height:10px;border-radius:99px;background:var(--panel2);overflow:hidden;max-width:260px;display:inline-block;vertical-align:middle;margin-right:10px;width:60%}
+.bar i{display:block;height:100%;background:#14b8a6}
+.site{padding:8px 0;border-bottom:1px dashed var(--line);font-size:13.5px}
+.site:last-child{border:0}
+.site code{background:var(--panel2);padding:1px 6px;border-radius:5px;font-size:12px}
+.fix{background:var(--ok-bg);color:var(--ok);padding:10px 12px;border-radius:8px;font-size:14px}
+.note{font-size:13px;color:var(--mute);margin-top:12px}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+@media (max-width:860px){.steps{grid-template-columns:minmax(0,1fr)}}
+.step{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px}
+.step .n{width:28px;height:28px;border-radius:8px;background:var(--brand-bg);color:var(--brand);display:grid;place-items:center;font-weight:700;margin-bottom:10px}
+.step h3{margin:0 0 6px;font-size:17px}
+.step p{margin:0;color:var(--mute);font-size:15px}
+.tw{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow-x:auto;max-width:100%}
+table{width:100%;min-width:560px;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);background:var(--panel2)}
+tr:last-child td{border-bottom:0}
+td:first-child{font-family:ui-monospace,monospace;font-weight:700;white-space:nowrap}
+.install pre{background:var(--code);color:var(--code-fg);padding:16px;border-radius:12px;overflow-x:auto;font-size:13.5px;margin:0 0 12px}
+.cols2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+@media (max-width:860px){.cols2{grid-template-columns:minmax(0,1fr)}}
+.limits{background:var(--panel);border:1px solid var(--line);border-left:4px solid #f59e0b;border-radius:10px;padding:16px 20px}
+.limits ul{margin:8px 0 0;padding-left:20px;color:var(--mute)}
+footer{border-top:1px solid var(--line);padding:32px 0;color:var(--mute);font-size:14px}
+footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+.inc{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:12px;padding:16px 18px;min-width:0}
+.inc h3{margin:0 0 6px;font-size:16px}
+.inc p{margin:0 0 8px;color:var(--mute);font-size:14.5px}
+.inc pre{margin:8px 0 0;background:var(--code);color:var(--code-fg);padding:10px 12px;border-radius:8px;font-size:12px;overflow-x:auto}
+.incs{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+pre.term{margin:0;background:var(--code);color:var(--code-fg);padding:14px 16px;font-size:12.5px;line-height:1.55;overflow-x:auto;white-space:pre}
+.term .hl{color:#fbbf24}
+.term .ok{color:#34d399}
+.term .bad{color:#f87171}
+.term .dim{color:#64748b}
+.player{display:flex;gap:8px;flex-wrap:wrap;padding:12px 14px;border-top:1px solid var(--line);align-items:center}
+.cap{font-size:13px;color:var(--mute);padding:10px 16px;border-top:1px solid var(--line);min-height:44px}
+.sim{display:inline-block;font:700 11px ui-monospace,monospace;color:var(--brand);background:var(--brand-bg);padding:2px 8px;border-radius:6px}
+.real{display:inline-block;font:700 11px ui-monospace,monospace;color:var(--ok);background:var(--ok-bg);padding:2px 8px;border-radius:6px}
+.note code,.sub code,.cap code{overflow-wrap:anywhere}
+.tcat{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;padding:14px}
+.tcat div{border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:13px;background:var(--panel2);min-width:0}
+.tcat b{font-family:ui-monospace,monospace;font-size:12px;word-break:break-all;display:block}
+.tcat span{color:var(--mute)}
+.ctrl{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 14px;border-top:1px solid var(--line)}
+.ctrl label{font-size:13px;color:var(--mute)}
+.ctrl select,.ctrl input[type=number],.ctrl input[type=text]{background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:13px}
+.ctrl input[type=number]{width:72px}
+.bars{padding:14px 16px;display:grid;gap:6px}
+.bar{display:grid;grid-template-columns:90px 1fr 56px;gap:8px;align-items:center;font:12px ui-monospace,monospace}
+.bar i{display:block;height:14px;border-radius:4px;background:var(--brand);min-width:2px}
+.bar i.zero{background:var(--err);opacity:.35;width:100%}
+.ta{display:block;width:100%;border:0;padding:12px 14px;font-size:12.5px;line-height:1.55;background:var(--code);color:var(--code-fg);resize:vertical;white-space:pre;overflow:auto;font-family:ui-monospace,monospace;height:150px}
+.lbl{display:block;padding:8px 14px;font-size:12px;color:var(--mute);background:var(--panel2);border-bottom:1px solid var(--line);border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<nav><div class="wrap">
+  <a class="logo" href="#top"><i></i>cassandra-ops-lab</a>
+  <div class="links"><a href="#try" class="hide-s">Try it</a><a href="#install" class="hide-s">Install</a><a class="btn" href="https://github.com/gerardrecinto/cassandra-ops-lab">GitHub</a></div>
+</div></nav>
+
+<header class="hero" id="top"><div class="wrap">
+  <h1>In Cassandra, the <em>query</em> decides the table.</h1>
+  <p class="lede">A data-modeling lab on a real 3-node cluster: query-first schema, day-bucketed partitions, TTL with TimeWindowCompactionStrategy, a counter table, consistency-level trade-offs and a node-stop recovery run.</p>
+  <div class="cta"><a class="btn primary" href="#try">Pick a query</a><a class="btn" href="#install">Run the lab</a></div>
+  <div class="stats"><div><b>3</b>tables, one per access pattern</div><div><b>3</b>nodes, RF 3, in the tests</div><div><b>2</b>real incidents documented</div></div>
+</div></header>
+
+
+<section id="try"><div class="wrap">
+  <h2>Design the table from the query</h2>
+  <p class="sub">Cassandra has no joins, so the table shape is the query plan. Pick one of the four queries the lab was designed around. The page loads the repo's real <code>ddl.py</code> and shows which table answers it and what its partition key must contain.</p>
+  <div class="lab">
+    <div class="card"><h3><span>Query to table <span class="real">REAL CODE</span></span>
+      <span class="tools" role="group" aria-label="Query">
+        <button class="chip" data-q="0" aria-pressed="true">Q1 recent by service</button>
+        <button class="chip" data-q="1" aria-pressed="false">Q2 one service, one day</button>
+        <button class="chip" data-q="2" aria-pressed="false">Q3 by service and env</button>
+        <button class="chip" data-q="3" aria-pressed="false">Q4 deploys today</button></span></h3>
+      <div class="sec" id="qinfo" aria-live="polite"><div class="status">Loading the schema module (about 10 MB the first time, cached after)...</div></div>
+      <pre class="term" id="ddl"></pre>
+    </div>
+    <div class="card"><h3><span>Sample events <span class="real">REAL CODE</span></span><span class="tools"><button class="chip" id="more">New sample</button></span></h3>
+      <pre class="term" id="ev" aria-live="polite"></pre>
+      <div class="cap">Made by the repo's <code>events.py</code>. Each event is written to two denormalized tables plus a counter, and the day string is what bounds partition size.</div>
+    </div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <h2>How many nodes can fail?</h2>
+  <p class="sub">Replication factor 3. Pick a consistency level and take nodes down. <span class="sim">SIMULATED MODEL</span> This is the replica arithmetic, not a cluster. It reproduces the outcomes of the repo's real node-stop run, shown below it.</p>
+  <div class="lab">
+    <div class="card"><h3><span>Replica arithmetic</span></h3>
+      <div class="ctrl">
+        <label for="cl">consistency</label><select id="cl"><option>ONE</option><option selected>QUORUM</option><option>ALL</option></select>
+        <label for="down">nodes down</label><select id="down"><option>0</option><option selected>1</option><option>2</option><option>3</option></select>
+      </div>
+      <pre class="term" id="cons" aria-live="polite"></pre>
+    </div>
+    <div class="card"><h3><span>What the real 3-node run printed</span></h3>
+      <pre class="term">== all 3 nodes up ==
+  WRITE SUCCEEDED at ALL, at QUORUM
+== 1 of 3 nodes down ==
+  <span class="bad">WRITE FAILED at ALL</span>
+     Unavailable: Cannot achieve consistency level ALL
+     (required_replicas=3, alive_replicas=2)
+  <span class="ok">WRITE SUCCEEDED at QUORUM</span>  needs 2 of 3, has 2
+  <span class="ok">WRITE SUCCEEDED at ONE</span>
+== all 3 nodes back up ==
+  <span class="ok">recovered: WRITE SUCCEEDED at ALL</span></pre>
+      <div class="cap">From the repo README. <code>ALL</code> fails at once with Unavailable, not a timeout, because the coordinator already knew from gossip it could not reach 3 replicas.</div>
+    </div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <h2>Measured latency, with its caveat</h2>
+  <p class="sub">From the README: 300 writes and 50 reads per run, one single-threaded client, all three nodes on one machine.</p>
+  <div class="tw"><table><thead><tr><th>Consistency</th><th>Write p50</th><th>Write p95</th><th>Write p99</th><th>Read p50</th><th>Read p95</th></tr></thead><tbody>
+    <tr><td>ONE</td><td>7.3 ms</td><td>10.3 ms</td><td>17.1 ms</td><td>2.5 ms</td><td>4.5 ms</td></tr>
+    <tr><td>LOCAL_QUORUM</td><td>11.0 ms</td><td>14.3 ms</td><td>21.1 ms</td><td>4.1 ms</td><td>6.3 ms</td></tr>
+    <tr><td>ALL</td><td>10.0 ms</td><td>12.7 ms</td><td>14.7 ms</td><td>4.0 ms</td><td>5.0 ms</td></tr>
+  </tbody></table></div>
+  <p class="note">The three nodes share a host with no network latency between them, so QUORUM and ALL barely separate. The README says the real gap would show up across availability zones or regions, and that this lab does not show it.</p>
+</div></section>
+
+<section><div class="wrap">
+  <h2>Two real incidents</h2>
+  <div class="incs">
+    <div class="inc"><h3>Two nodes joining at once collided on a token</h3><pre>Bootstrap Token collision between
+/172.22.0.3:7000 and /172.22.0.4:7000</pre><p style="margin-top:8px">Fix: start one node, wait for <code>UN</code> in <code>nodetool status</code>, then start the next.</p></div>
+    <div class="inc"><h3>Writing right after DDL failed</h3><pre>WriteFailure: INCOMPATIBLE_SCHEMA from /172.22.0.3:7000</pre><p style="margin-top:8px">Schema changes spread by gossip. Writing before every replica agrees can hit one on the old schema. Fix: a short wait after creating tables.</p></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <h2>Tests <span id="tcount" class="cnt"></span></h2>
+  <p class="sub">Read from the repo's test files on every deploy. They run against a real 3-node cluster.</p>
+  <div class="card"><div class="tcat" id="tcat"><div>Loading...</div></div></div>
+</div></section>
+
+<section id="install" class="install"><div class="wrap">
+  <h2>Run it yourself</h2>
+  <p class="sub">Docker and Python 3.12. Start the nodes one at a time.</p>
+  <div class="cols2">
+    <div>
+<pre>docker compose up -d cassandra-1
+# wait for UN in nodetool status
+docker compose up -d cassandra-2
+# wait for UN again
+docker compose up -d cassandra-3</pre>
+    </div>
+    <div>
+<pre>python -m pytest tests/ -v
+python scripts/failure_recovery_demo.py
+python -m cassandra_ops_lab.loadtest.load_runner \
+  --n-events 300 --consistency LOCAL_QUORUM</pre>
+    </div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <div class="limits"><strong>What this does not do</strong><ul>
+    <li>It is a local lab with heap-capped containers. It makes no production capacity claim.</li>
+    <li>The replica arithmetic panel is a model of the rule, not Cassandra. The tests and the node-stop transcript are the evidence.</li>
+    <li>The README says Cassandra was a hands-on gap before this project. Treat it as a learning lab, not years of operating a cluster.</li>
+    <li>Counter tables cannot have a TTL and cannot hold non-counter columns. The tests cover that limit.</li>
+  </ul></div>
+</div></section>
+
+
+<footer><div class="wrap">
+  <span>cassandra-ops-lab. Built by <a href="https://github.com/gerardrecinto">Gerard Recinto</a>.</span>
+  <span><a href="https://github.com/gerardrecinto/cassandra-ops-lab">Source</a> &middot; <a href="https://github.com/gerardrecinto/cassandra-ops-lab/releases">Releases</a></span>
+</div></footer>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script>
+
+(() => {
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const track = (n) => { try { if (window.plausible) window.plausible(n); } catch (e) {} };
+
+  function renderTests(el, countEl, tests) {
+    if (countEl) countEl.textContent = tests.length;
+    const by = {}; tests.forEach((t) => (by[t.file] = by[t.file] || []).push(t));
+    el.innerHTML = Object.entries(by).map(([f, ts]) => `<div><b>${esc(f)} (${ts.length})</b>${ts.map((t) => `<span>${esc(t.name.replace(/^test_/, "").replace(/_/g, " "))}</span><br>`).join("")}</div>`).join("");
+  }
+
+  let py = null, cur = 0;
+  const Q = [
+    ["Q1: most recent N deploys for a service", "deploy_events_by_service_day", "(service, day)", "Read today's partition first, then walk back one day at a time, up to seven days by default. Rows inside a partition are already sorted newest first."],
+    ["Q2: all deploys for a service on one day", "deploy_events_by_service_day", "(service, day)", "One partition read. The day bucket is what keeps the answer bounded."],
+    ["Q3: recent deploys for a service in one environment", "deploy_events_by_service_env_day", "(service, environment, day)", "A second table, denormalized on purpose, so the environment filter is part of the key and not a scan."],
+    ["Q4: how many deploys has a service had today", "deploy_counts_by_service_day", "(service, day)", "A counter column increments atomically with no read first, so no full-partition COUNT is needed."],
+  ];
+  const PY = `
+import json, random
+from cassandra_ops_lab.schema import ddl
+from cassandra_ops_lab.events import generate_event
+def tables():
+    return json.dumps({"by_day": ddl.DEPLOY_EVENTS_BY_SERVICE_DAY_DDL, "by_env": ddl.DEPLOY_EVENTS_BY_SERVICE_ENV_DAY_DDL, "counts": ddl.DEPLOY_COUNTS_BY_SERVICE_DAY_DDL})
+def sample(seed, n):
+    rng = random.Random(seed)
+    out = []
+    for _ in range(n):
+        e = generate_event(rng)
+        out.append({"service": e["service"], "environment": e["environment"], "status": e["status"], "duration": e["duration_seconds"], "day": e["occurred_at"].strftime("%Y-%m-%d")})
+    return json.dumps(out)
+`;
+  let T = null;
+  function showQ() {
+    document.querySelectorAll("[data-q]").forEach((b) => b.setAttribute("aria-pressed", +b.dataset.q === cur));
+    const q = Q[cur];
+    $("qinfo").innerHTML = `<b>${esc(q[0])}</b><div style="margin-top:6px">Table <code>${esc(q[1])}</code>, partition key <code>${esc(q[2])}</code></div><div class="note">${esc(q[3])}</div>`;
+    if (T) $("ddl").textContent = ({ deploy_events_by_service_day: T.by_day, deploy_events_by_service_env_day: T.by_env, deploy_counts_by_service_day: T.counts })[q[1]].trim();
+  }
+  document.querySelectorAll("[data-q]").forEach((b) => b.addEventListener("click", () => { cur = +b.dataset.q; showQ(); track("ca_query"); }));
+  let seed = 11;
+  function ev() {
+    if (!py) return;
+    const rows = JSON.parse(py.runPython(`sample(${seed}, 6)`));
+    $("ev").innerHTML = rows.map((r) => `<span class="dim">${esc(r.day)}</span> ${esc(r.service)} ${esc(r.environment)} <span class="${r.status === "succeeded" ? "ok" : "bad"}">${esc(r.status)}</span> ${r.duration}s\n<span class="dim">  partition: (${esc(r.service)}, ${esc(r.day)})   env partition: (${esc(r.service)}, ${esc(r.environment)}, ${esc(r.day)})</span>`).join("\n");
+  }
+  $("more").addEventListener("click", () => { seed += 1; ev(); });
+
+  function cons() {
+    const rf = 3, down = +$("down").value, alive = rf - down, cl = $("cl").value;
+    const need = { ONE: 1, QUORUM: Math.floor(rf / 2) + 1, ALL: rf }[cl];
+    const ok = alive >= need;
+    $("cons").innerHTML = `replication factor ${rf}, ${alive} replicas alive\n${cl} needs ${need} of ${rf}\n\n` + (ok ? `<span class="ok">WRITE SUCCEEDS</span>  ${alive} alive is at least ${need}` : `<span class="bad">WRITE FAILS</span>  Unavailable: required_replicas=${need}, alive_replicas=${alive}`);
+  }
+  ["cl", "down"].forEach((id) => $(id).addEventListener("change", () => { cons(); track("ca_cons"); }));
+  cons(); showQ();
+  fetch("tests.json").then((r) => r.json()).then((t) => renderTests($("tcat"), $("tcount"), t)).catch(() => { $("tcat").innerHTML = "<div>The test list did not load.</div>"; });
+  (async () => {
+    try {
+      py = await loadPyodide();
+      py.FS.mkdirTree("/lib/cassandra_ops_lab/schema");
+      for (const f of ["__init__.py", "events.py", "schema/__init__.py", "schema/ddl.py"]) { const r = await fetch("py/" + f); if (!r.ok) throw new Error("could not load " + f); py.FS.writeFile("/lib/cassandra_ops_lab/" + f, await r.text()); }
+      py.runPython("import sys; sys.path.insert(0, '/lib')"); py.runPython(PY);
+      T = JSON.parse(py.runPython("tables()")); showQ(); ev(); window.__CA_READY__ = true;
+    } catch (e) { $("qinfo").innerHTML = '<div class="status">The in-browser schema did not load (' + esc(String(e.message || e).split("\n").pop()) + ").</div>"; }
+  })();
+})();
+
+</script>
+</body>
+</html>
