@@ -2,14 +2,13 @@
 
 ## What this is
 
-A Cassandra data-modeling portfolio project closing a genuine hands-on
-gap: query-first schema design, time-bucketed partitions, TTL-aware
+A Cassandra data-modeling lab: query-first schema design, time-bucketed partitions, TTL-aware
 compaction strategy choice, consistency-level tradeoffs, and real
 failure/recovery testing against a live 3-node cluster — including two
 real operational incidents hit and fixed while building it, documented
 as they actually happened, not smoothed over.
 
-## Resume bullets (accurate language only)
+## What was built
 
 - Built a query-first Cassandra schema (three denormalized tables, one
   per access pattern) with time-bucketed partition keys and
@@ -23,11 +22,9 @@ as they actually happened, not smoothed over.
   pattern and where Postgres would be the better choice instead.
 
 **Not used, and why**: "operated Cassandra in production," "managed a
-production cluster" — I have no prior professional Cassandra experience;
-this project demonstrates newly built hands-on capability, not
-prior ownership.
+production cluster" — this lab runs a local 3-node cluster, not a production deployment.
 
-## Interview talking points
+## Design notes
 
 **"Walk me through your data model."**
 Four queries, decided first, drove three tables — no normalization, no

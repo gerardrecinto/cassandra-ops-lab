@@ -1,13 +1,11 @@
 # cassandra-ops-lab
 
-A Cassandra data-modeling portfolio project built to close a genuine
-hands-on gap. Query-first schema design, time-bucketed partitions,
+A Cassandra data-modeling lab. Query-first schema design, time-bucketed partitions,
 TTL/tombstone-aware compaction, consistency-level tradeoffs, and real
 failure/recovery testing — run against an actual local 3-node Cassandra
 cluster (RF=3), not a single-node stand-in.
 
-**Honesty note**: Cassandra was a genuine gap in my hands-on experience
-before this project. Everything in this repo — including the two real
+**Scope**: everything in this repo — including the two real
 operational incidents documented below, which I hit and fixed while
 building this, not fabricated for the README — was learned and verified
 in this lab.
